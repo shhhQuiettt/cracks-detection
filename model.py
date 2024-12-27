@@ -74,18 +74,21 @@ class Decoder(nn.Module):
 
 class UNet(nn.Module):
     def __init__(
-        self, encoding_channels: tuple[int, ...], decoding_channels: tuple[int, ...]
+        self, encoding_channels: tuple[int, ...], decoding_channels: tuple[int, ...], retain_dim:bool =False, output_format=(448,448)
     ):
         super().__init__()
         self.encoder = Encoder(encoding_channels)
         self.decoder = Decoder(decoding_channels)
         self.head_out = nn.Conv2d(decoding_channels[-1], 1, kernel_size=1)
+        self.retain_dim  = retain_dim
+        self.output_format = output_format
 
-    def forward(X):
+    def forward(self, X):
         features = self.encoder(X)
         X = self.decoder(features[-1], features[::-1][1:])
         X = self.head_out(X)
-
+        if self.retain_dim:
+            X = F.interpolate(X, self.output_format)
         return X
 
 
@@ -99,7 +102,7 @@ class Trainer:
         val_loader,
         optimizer,
     ):
-        self.model = model
+        self.model = model.to('cuda')
         self.loss_function = loss_function
         self.train_loader = train_loader
         self.val_loader = val_loader
@@ -110,6 +113,9 @@ class Trainer:
         running_loss = 0
 
         for X_batch, y_batch in self.train_loader:
+            X_batch = X_batch.to('cuda')
+            y_batch = y_batch.to('cuda')
+
             y_batch_prediced = self.model(X_batch)
             loss = self.loss_function(y_batch, y_batch_prediced)
 
@@ -122,17 +128,51 @@ class Trainer:
         epoch_loss = running_loss / len(self.train_loader)
 
         return epoch_loss
+    
+    def validate(self):
+        self.model.eval()
+        running_loss = 0
+
+        with torch.no_grad():
+            for X_batch, y_batch in self.val_loader:
+                X_batch = X_batch.to('cuda')
+                y_batch = y_batch.to('cuda')
+
+                y_batch_prediced = self.model(X_batch)
+                loss = self.loss_function(y_batch, y_batch_prediced)
+
+                running_loss += loss.item()
+
+        epoch_loss = running_loss / len(self.val_loader)
+
+        return epoch_loss
+    
+    def train(self, epochs: int):
+        for epoch in range(epochs):
+            train_loss = self.train_one_epoch()
+            print("fff")
+            val_loss = self.validate()
+
+            print(f"Epoch: {epoch} - Train Loss: {train_loss} - Val Loss: {val_loss}")
+        
 
 
-endoding_channels = (3, 64, 128, 256, 512, 1024)
-decoding_channels = (1024, 512, 256, 128, 64)
 
-encoder = Encoder(endoding_channels)
-dec = Decoder(decoding_channels)
+# endoding_channels = (3, 64, 128, 256, 512, 1024)
+# decoding_channels = (1024, 512, 256, 128, 64)
 
-X = torch.randn((2, 3, 448, 448))
+# model = UNet(endoding_channels, decoding_channels, retain_dim=True)
 
-features = encoder(X)
-res = dec(features[-1], features[::-1][1:])
+# encoder = Encoder(endoding_channels)
+# dec = Decoder(decoding_channels)
 
-print(res.shape)
+# X = torch.randn((2, 3, 448, 448))
+
+# output = model(X)
+# print(output.shape)
+
+# features = encoder(X)
+# print(features[-1].shape)
+# res = dec(features[-1], features[::-1][1:])
+
+# print(res.shape)
